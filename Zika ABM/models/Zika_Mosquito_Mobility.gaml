@@ -9,7 +9,7 @@ model Zika_Mobility_Transmission
 global {
 	
 	//Simulation Timings
-	float step <- 10 #mn;
+	float step <- 120 #mn;
 	int current_hour update: (time / #hour) mod 24;
 	int days_passed update: int(time/86400);
 	int current_month update: int(days_passed/30);
@@ -20,12 +20,12 @@ global {
 	file shape_file_buildings <- file("../includes/RhBuildings.shp");
 	file shape_file_roads <- file("../includes/Rhroads.shp");
 	file shape_file_bounds <- file("../includes/Rhbounds.shp");
-	geometry shape <- envelope(shape_file_bounds);
+	geometry shape <- envelope(shape_file_buildings);
 	graph the_graph;
 	
 	//Global Variables
 	int nb_people <- 200;
-	int mosquito_no <- 600;
+	int mosquito_no <- 800;
 	int nb_infected_init <- 1;
 	
 	//Mosquito Disease Parameters Global
@@ -41,12 +41,18 @@ global {
 	
 	//Human Disease Parameters Global
 	float human_sensor_range <- 1.0 #m;
+	float human_sensor_range_2 <- 0.5 #m;
 	
 	//Human Mobilty Parameters
 	int min_work_start <- 6;
 	int max_work_start <- 8;
 	int min_work_end <- 16; 
-	int max_work_end <- 20; 
+	int max_work_end <- 18;
+	int min_leisure_start <-19;
+	int max_leisure_start <- 21;
+	int min_leisure_end <-23;
+	int max_leisure_end <- 24;
+	 
 	float min_speed <- 1.0 #km / #h;
 	float max_speed <- 5.0 #km / #h; 
 	float destroy <- 0.02;
@@ -54,20 +60,23 @@ global {
 	
 	//Validation Parameters
 	int nb_people_infected <- nb_infected_init update: people count (each.is_infected);
+	int nb_female_infected <- 0 update: people count (each.is_infected and each.sex = 1);
+	
 	int nb_people_not_infected <- nb_people - nb_infected_init update: nb_people - nb_people_infected;
 	float infected_rate update: nb_people_infected/nb_people;
-	int nb_mosquito_infected <- 1 update: mosquito count (each.is_infected);
+	int nb_mosquito_infected <- 10 update: mosquito count (each.is_infected);
 	int nb_egg_infected <- 0 update: egg count (each.is_infected);
 	int nb_infected_cumulative <- nb_infected_init;
 	int nb_eggs <- 0 update: egg count(each.age>=0);
-	
-	
-	
-	
+	int nb_microcephaly_cases <- 0;
+	int nb_working_place_infections <- 0;
+	int nb_home_place_infections <- 0;
+	int nb_leisure_place_infections <- 0;
 	
 	init {
 		create building from: shape_file_buildings with: [type::string(read ("NATURE"))] {
 			if type="Industrial" {
+				write "INDUSTRIAL" ;
 				color <- #red ;
 			}
 			if type="Leisure" {
@@ -84,21 +93,37 @@ global {
 		
 		list<building> residential_buildings <- building where (each.type="Residential");
 		list<building>  industrial_buildings <- building  where (each.type="Industrial") ;
+		list<building>  leisure_buildings <-  building  where (each.type="Leisure") ;
+		
 		list<building>  watersources <- building  where (each.type="Lake") ;
 		
 		create people number: nb_people {
 			speed <- min_speed + rnd (max_speed - min_speed) ;
 			start_work <- min_work_start + rnd (max_work_start - min_work_start) ;
 			end_work <- min_work_end + rnd (max_work_end - min_work_end) ;
+			start_leisure <- min_leisure_start + rnd (max_leisure_start - min_leisure_start) ;
+			end_leisure <- min_leisure_end + rnd (max_leisure_end - min_leisure_end) ;
 			living_place <- one_of(residential_buildings) ;
 			working_place <- one_of(industrial_buildings) ;
+			leisure_place <- one_of(leisure_buildings) ;
 			objective <- "resting";
-			location <- any_location_in (living_place); 
+			location <- any_location_in (living_place);
+			sex <- rnd(1);
+			age <- 16 + rnd(50 - 16); 
+			if(sex = 1 and flip(0.5))
+			{
+				is_pregnant <- true;
+				color <- #yellow;
+			}
+			if(sex = 0)
+			{
+				color <- #black;
+			}
 		}
 		
 		create egg number:25{
 				living_place <- one_of(watersources) ;
-				is_infected <- false;
+				is_infected <- true;
 				max_age <- 8;
 				age <- 0;
 			}
@@ -106,21 +131,18 @@ global {
 				living_place <- one_of(watersources);
 				location <- any_location_in(living_place);	
 				mos_age <- 0;
-		}
-	}
-	
-	reflex update_graph{
-		map<road,float> weights_map <- road as_map (each:: (each.destruction_coeff * each.shape.perimeter));
-		the_graph <- the_graph with_weights weights_map;
-	}
-	reflex repair_road when: every(repair_time #hour / step) {
-		road the_road_to_repair <- road with_max_of (each.destruction_coeff) ;
-		ask the_road_to_repair {
-			destruction_coeff <- 1.0 ;
+				is_infected <- true;
 		}
 	}
 }
-
+species pathogens {
+	
+	bool is_exposed <- true;
+	bool is_entry <- false;
+   	bool is_replicated <- false;
+   	bool is_shedding <- false;
+   	bool is_latency <- false;
+}
 species egg {
 	int age <- 0;
 	bool is_infected <- false;
@@ -161,9 +183,9 @@ species mosquito skills:[moving]{
 	int mos_age <- 0;
 	int adult_lifespan <- 5;
 	int time_passed_virus <- 0;
-	
+	rgb color <- #green;
 	reflex move when:  !(current_hour < 7 or current_hour > 20){
-		do wander amplitude:350 #m;
+		do wander ;
 	}
 
 	reflex age when: time mod 86400=0{
@@ -179,12 +201,24 @@ species mosquito skills:[moving]{
 			ask any (people at_distance sensor_range) {
 					myself.num_meals_today <- myself.num_meals_today + 1;
 					if myself.is_infected{
-						float p_trans <- 0.6;
+						float p_trans <- 0.3;
 						if (state=0){
 							if flip(p_trans){	
 								is_infected <- true;
 								state <- 1;
 								nb_infected_cumulative <- nb_infected_cumulative+1;
+								if(self.mobility_state = 0)
+								{
+									nb_home_place_infections <- nb_home_place_infections + 1;
+								}
+								if(self.mobility_state = 1)
+								{
+									nb_working_place_infections <- nb_working_place_infections + 1;
+								}
+								if(self.mobility_state = 2)
+								{
+									nb_leisure_place_infections <- nb_leisure_place_infections + 1;
+								}
 							}
 						}
 					}
@@ -197,6 +231,7 @@ species mosquito skills:[moving]{
 						float p_trans <- 0.5;
 						if flip(p_trans) {
 							myself.is_infected <- true;
+							myself.color <- #red ;
 						}
 					}
 				
@@ -238,7 +273,8 @@ species mosquito skills:[moving]{
 	
 }
 aspect base{
-		draw shape color:is_infected ? #violet : #green;
+		color <- is_infected ? #red : #green;
+		draw shape color:color;
 	}
 }
 
@@ -267,17 +303,52 @@ species people skills:[moving] {
 	//mobility Parameters
 	building living_place <- nil ;
 	building working_place <- nil ;
+	building leisure_place <- nil ;
+	
 	int start_work ;
 	int end_work  ;
+	int start_leisure;
+	int end_leisure;
 	string objective ; 
 	point the_target <- nil ;
+	int mobility_state <- 0; // 0->home 1->working 2->leisure
+	
+	//0 male 1 female 
+	int sex <- 0;
+	bool is_pregnant <- false;
+	int age ;
+	
 	
 	//Disease Parameters
 	bool is_infected <- false;	
 	bool in_my_house <- true;
 	int state <- 0; // 0->Susceptible 1->Exposed 2->Infected 3-> Cured
-	list<int> state_duration <- [0,0,0,0]; 
+	//cdc data 
+	int minsusceptibledays <- 1 ;
+	int maxsusceptibledays <- 2 ;
+	int minexposeddays <- 2;
+	int maxexposeddays <- 7;
+	int mininfecteddays <- 2;
+	int maxinfecteddays <- 7;
+	list<int> state_duration <- [minsusceptibledays + rnd (maxsusceptibledays - minsusceptibledays),minexposeddays + rnd (maxexposeddays - minexposeddays),mininfecteddays + rnd (maxinfecteddays - mininfecteddays),60]; 
 	int days_infected <- 0;
+	
+	
+	reflex sexualtransmission {
+		ask any (people at_distance human_sensor_range_2) {
+				if(myself.sex = 1 and self.age - myself.age <=4 and self.is_infected = true and myself.is_pregnant = true)
+				{
+					float p_trans <- 0.2;
+					//https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5079617/
+					myself.is_pregnant <- false;
+					if(flip(p_trans))
+					{
+						nb_microcephaly_cases <- nb_microcephaly_cases + 1;
+					}				
+					
+				}
+		}
+	}
 	
 	reflex infect when:  state = 2{
 			ask any (people at_distance human_sensor_range) {
@@ -297,22 +368,35 @@ species people skills:[moving] {
 		objective <- "working" ;
 		the_target <- any_location_in (working_place);
 		in_my_house <- false;
+		mobility_state <- 1;
 	}
 		
 	reflex time_to_go_home when: current_hour = end_work and objective = "working"{
 		objective <- "resting" ;
 		the_target <- any_location_in (living_place);
 		in_my_house <- true;
+		mobility_state <- 0;
 		 
 	} 
-	 
+	reflex time_to_go_leisure when: current_hour = start_leisure and objective = "resting"{
+		objective <- "working" ;
+		the_target <- any_location_in (leisure_place);
+		in_my_house <- false;
+		mobility_state <- 2;
+	} 
+	reflex time_to_go_home_from_leisure when: current_hour = end_leisure and objective = "working"{
+		objective <- "resting" ;
+		the_target <- any_location_in (living_place);
+		in_my_house <- true;
+		mobility_state <- 0;
+		
+	} 
 	reflex move when: the_target != nil {
 		path path_followed <- self goto [target::the_target, on::the_graph, return_path:: true];
 		list<geometry> segments <- path_followed.segments;
 		loop line over: segments {
 			float dist <- line.perimeter;
 			ask road(path_followed agent_from_geometry line) { 
-				destruction_coeff <- destruction_coeff + (destroy * dist / shape.perimeter);
 			}
 		}
 		if the_target = location {
@@ -323,13 +407,21 @@ species people skills:[moving] {
 			days_infected <- days_infected+1;
 		if state = 1 and (days_infected - state_duration[1] = 0){
 				state <- 2;
+				if(sex = 1) {
+					color <- #violet;
+				}
+				else if (sex = 0) {
+					color <- #red;
+				}
 		}
 		else if state = 2 and (days_infected - state_duration[1] - state_duration[2] = 0){				
-					state <- 3;				
+				state <- 3;				
 				is_infected <- false;
+				color <- #white;
 		}	
 	}
 	aspect base {
+		
 		draw shape color: color;
 	}
 }
@@ -347,42 +439,46 @@ experiment Human_intercity_mobility type: gui {
 	parameter "maximal speed" var: max_speed category: "People" max: 10 #km/#h;
 	
 	output {
-		monitor "Current Day" value: days_passed;
+	monitor "Current Day" value: days_passed;
 	monitor "Current Hour" value: current_hour;
 	monitor "Current Month" value: current_month;
 	monitor "Current Time" value: time/60;
 	monitor "Infected people" value: nb_people_infected; 
 	monitor "Infected mosqutios" value: nb_mosquito_infected;		
 	monitor "Infected people cumulative" value: nb_infected_cumulative;	
+	monitor "Microcephaly cases" value: nb_microcephaly_cases;
+	monitor "Residential Place Infections cases" value: nb_home_place_infections;	
+	monitor "Working Place Infection cases" value: nb_working_place_infections;	
+	monitor "Leisure Place Infection cases" value: nb_leisure_place_infections;	
+	
+	
 		display city_display type:opengl {
 			species building aspect: base ;
 			species road aspect: base ;
 			species people aspect: base ;
 			species mosquito aspect: base; 
 		}
-		display chart_display refresh_every: 10 { 
-			chart "Epidemic Status" type: series size: {1, 0.5} position: {0, 0} {
-				data "Epidemic in Residential" value: mean (road collect each.destruction_coeff) style: line color: #green ;
-				data "Epidemic in Industrial" value: road max_of each.destruction_coeff style: line color: #red ;
-				data "Epidemic in Leisure" value: road max_of each.destruction_coeff style: line color: #black ;
+		display microcephaly_chart refresh_every: 10 {
+				chart "microcephaly cases" type: series {
+				data "microcephaly_cases_count" value: nb_microcephaly_cases color: #red;
+				data "female infected population" value:nb_female_infected  color: #blue;
 				
-			}
-			chart "People Objectif" type: pie style: exploded size: {1, 0.5} position: {0, 0.5}{
-				data "Working" value: people count (each.objective="working") color: #magenta ;
-				data "Resting" value: people count (each.objective="resting") color: #blue ;
+				}
+		}
+		display chart_display refresh_every: 10 { 
+			chart "Epidemic Status" type: series {
+				data "Epidemic in Residential" value: nb_home_place_infections style: line color: #green ;
+				data "Epidemic in Industrial" value: nb_working_place_infections style: line color: #red ;
+				data "Epidemic in Leisure" value: nb_leisure_place_infections style: line color: #black ;
+				
 			}
 		}
 		display chart1 refresh_every: 10 {
 			chart "Disease spread" type: series {
 				data "infected" value: nb_people_infected color: #red;
-				data "infected cumulative (/500)" value: nb_infected_cumulative color: #blue;
-			}
-		}
-		
-		display chart2 refresh_every: 10 {
-			chart "Mosquito Population" type: series {
-				data "Mosquito_Population" value: mosquito_no color: #blue;
-				data "infected" value: nb_mosquito_infected color: #red;
+				data "infected" value: nb_people_infected color: #blue;
+				data "Mosquito_Population" value: mosquito_no color: #green;
+				data "infected" value: nb_mosquito_infected color: #yellow;
 				data "num_eggs" value: nb_eggs color: #black;
 			}
 		}
