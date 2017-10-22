@@ -20,6 +20,7 @@ global {
 	file shape_file_buildings <- file("../includes/RhBuildings.shp");
 	file shape_file_roads <- file("../includes/Rhroads.shp");
 	file shape_file_bounds <- file("../includes/Rhbounds.shp");
+	
 	geometry shape <- envelope(shape_file_buildings);
 	graph the_graph;
 	
@@ -27,6 +28,11 @@ global {
 	int nb_people <- 200;
 	int mosquito_no <- 800;
 	int nb_infected_init <- 1;
+	
+	//temperature variables
+	matrix data;
+	
+	
 	
 	//Mosquito Disease Parameters Global
 	float fetal_mortality <- 0.01;
@@ -52,6 +58,9 @@ global {
 	int max_leisure_start <- 21;
 	int min_leisure_end <-23;
 	int max_leisure_end <- 24;
+	int max_temp <- 0;
+	int min_temp <- 0;
+	int cur_temp  <- 0;
 	 
 	float min_speed <- 1.0 #km / #h;
 	float max_speed <- 5.0 #km / #h; 
@@ -74,6 +83,8 @@ global {
 	int nb_leisure_place_infections <- 0;
 	
 	init {
+			data <- matrix(tmp_csv_file);
+		
 		create building from: shape_file_buildings with: [type::string(read ("NATURE"))] {
 			if type="Industrial" {
 				write "INDUSTRIAL" ;
@@ -110,7 +121,7 @@ global {
 			location <- any_location_in (living_place);
 			sex <- rnd(1);
 			age <- 16 + rnd(50 - 16); 
-			if(sex = 1 and flip(0.5))
+			if(sex = 1 and flip(0.2))
 			{
 				is_pregnant <- true;
 				color <- #yellow;
@@ -134,6 +145,27 @@ global {
 				is_infected <- true;
 		}
 	}
+	
+//	https://www.yr.no/place/India/Karnataka/Bangalore/statistics.html
+	reflex temperature_update {
+		min_temp <- data[2,current_month + 1];
+		max_temp <- data[1,current_month + 1];
+ 		cur_temp <-  min_temp + rnd (max_temp - min_temp) ;
+	}
+	
+	reflex save_result when: (days_passed = 2)  {
+		save ("cycle: "+ cycle + "; nb_people_infected: " + nb_people_infected
+			+ "; nb_mosquito_infected: " + nb_mosquito_infected
+			+ "; nb_microcephaly_cases: " + nb_microcephaly_cases
+	   		+ "; nb_home_place_infections: " + nb_home_place_infections           
+	   		+ "; nb_working_place_infections: " + nb_working_place_infections       
+	   		+ "; nb_leisure_place_infections: " + nb_leisure_place_infections) 
+	   		to: "captured_data.csv" type: "csv" ;
+	}
+	
+	reflex stop_simulation when: (days_passed = 3) {
+		do halt ;
+	} 
 }
 species pathogens {
 	
