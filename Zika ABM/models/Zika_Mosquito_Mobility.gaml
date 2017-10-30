@@ -17,6 +17,16 @@ global {
 	
 	//Load GisData and Temperature Csv File
 	file tmp_csv_file <- csv_file("../includes/TemperatureCsv - Sheet1.csv",",");
+	
+//	http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0055777
+//	http://journals.plos.org/plosntds/article?id=10.1371/journal.pntd.0005568
+//laboratory results
+//normal 
+	file tbv_file <- csv_file("../includes/TempBiteratevitality.csv",",");
+	//https://malariajournal.biomedcentral.com/articles/10.1186/s12936-016-1411-6
+//exponential
+	file trr_file <- csv_file("../includes/TempRainfallReprorate.csv",",");
+	
 	file shape_file_buildings <- file("../includes/RhBuildings.shp");
 	file shape_file_roads <- file("../includes/Rhroads.shp");
 	file shape_file_bounds <- file("../includes/Rhbounds.shp");
@@ -25,13 +35,19 @@ global {
 	graph the_graph;
 	
 	//Global Variables
-	int nb_people <- 200;
-	int mosquito_no <- 800;
+	int nb_people <- 400;
+	int mosquito_no <- 1000;
 	int nb_infected_init <- 1;
 	
 	//temperature variables
 	matrix data;
-	
+	matrix tbv;
+	matrix trr;
+	int max_temp <- 0;
+	int min_temp <- 0;
+	int cur_temp  <- 0;
+	int prec_rainfall <- 0;
+	 
 	
 	
 	//Mosquito Disease Parameters Global
@@ -58,10 +74,7 @@ global {
 	int max_leisure_start <- 21;
 	int min_leisure_end <-23;
 	int max_leisure_end <- 24;
-	int max_temp <- 0;
-	int min_temp <- 0;
-	int cur_temp  <- 0;
-	 
+
 	float min_speed <- 1.0 #km / #h;
 	float max_speed <- 5.0 #km / #h; 
 	float destroy <- 0.02;
@@ -73,7 +86,7 @@ global {
 	
 	int nb_people_not_infected <- nb_people - nb_infected_init update: nb_people - nb_people_infected;
 	float infected_rate update: nb_people_infected/nb_people;
-	int nb_mosquito_infected <- 10 update: mosquito count (each.is_infected);
+	int nb_mosquito_infected <- 100 update: mosquito count (each.is_infected);
 	int nb_egg_infected <- 0 update: egg count (each.is_infected);
 	int nb_infected_cumulative <- nb_infected_init;
 	int nb_eggs <- 0 update: egg count(each.age>=0);
@@ -81,13 +94,16 @@ global {
 	int nb_working_place_infections <- 0;
 	int nb_home_place_infections <- 0;
 	int nb_leisure_place_infections <- 0;
+	int nb_mosquitoes_left <- 0 update : mosquito count (each);
 	
 	init {
 			data <- matrix(tmp_csv_file);
+			tbv <- matrix(tbv_file);
+			trr <- matrix(trr_file);
+			
 		
 		create building from: shape_file_buildings with: [type::string(read ("NATURE"))] {
 			if type="Industrial" {
-				write "INDUSTRIAL" ;
 				color <- #red ;
 			}
 			if type="Leisure" {
@@ -97,6 +113,9 @@ global {
 				color <- #blue ;
 			}
 		}
+		create bounds from :shape_file_bounds;
+		create rainbounds from :shape_file_bounds;
+		
 		create road from: shape_file_roads ;
 		map<road,float> weights_map <- road as_map (each:: (each.destruction_coeff * each.shape.perimeter));
 		the_graph <- as_edge_graph(road) with_weights weights_map;
@@ -151,6 +170,56 @@ global {
 		min_temp <- data[2,current_month + 1];
 		max_temp <- data[1,current_month + 1];
  		cur_temp <-  min_temp + rnd (max_temp - min_temp) ;
+ 		//normal distribution
+ 		int cur_rainfall <- data[3,current_month + 1];
+ 		int val <- 0 + rnd (2) ;
+ 		int min_rainfall <- cur_rainfall - val;
+ 		int max_rainfall <- cur_rainfall + val;
+ 		if(min_rainfall < 0)
+ 		{
+ 			min_rainfall <- 0;
+ 		}
+ 		if( max_rainfall> 14)
+ 		{
+ 			max_rainfall <- 14; 
+ 		} 		
+ 		prec_rainfall <- min_rainfall + rnd (max_rainfall - min_rainfall) ;
+ 		write "hello" + prec_rainfall + "temp" + cur_temp ;
+ 		list<building>  watersources <- building  where (each.type="Lake") ;
+ 		int leftmosquitoes <- 1000 - nb_mosquitoes_left;
+ 		if(prec_rainfall >=2 and prec_rainfall <= 7)
+		{
+			write "leftmosquitoes" + leftmosquitoes;
+			create mosquito  number:(leftmosquitoes /4) {
+				living_place <- one_of(watersources);
+				location <- any_location_in(living_place);	
+				mos_age <- 0;
+				is_infected <- true;
+			}
+		}
+		if(prec_rainfall >=8 and prec_rainfall <= 10)
+		{
+			write "leftmosquitoes" + leftmosquitoes;
+			
+			create mosquito  number:(leftmosquitoes /3) {
+				living_place <- one_of(watersources);
+				location <- any_location_in(living_place);	
+				mos_age <- 0;
+				is_infected <- true;
+			}
+			
+		}
+		if(prec_rainfall >=11 and prec_rainfall <= 14)
+		{
+						write "leftmosquitoes" + leftmosquitoes;
+			
+			create mosquito  number:(leftmosquitoes /2) {
+				living_place <- one_of(watersources);
+				location <- any_location_in(living_place);	
+				mos_age <- 0;
+				is_infected <- true;
+			}
+		}
 	}
 	
 	reflex save_result when: (days_passed = 2)  {
@@ -163,17 +232,20 @@ global {
 	   		to: "captured_data.csv" type: "csv" ;
 	}
 	
-	reflex stop_simulation when: (days_passed = 3) {
+	reflex stop_simulation when: (days_passed = 359) {
 		do halt ;
 	} 
 }
 species pathogens {
+	int n <- 1 + rnd(20 - 1);
+	int k <- 100;
+	int flavivirusrate <- 12 + rnd(25 - 12);
+	reflex population_growth {
+		float r <- flavivirusrate / 100;
+		float l <- (k - n) / k;
+		n <- r * n * l ;  
+	}
 	
-	bool is_exposed <- true;
-	bool is_entry <- false;
-   	bool is_replicated <- false;
-   	bool is_shedding <- false;
-   	bool is_latency <- false;
 }
 species egg {
 	int age <- 0;
@@ -208,18 +280,56 @@ species mosquito skills:[moving]{
 	building living_place <- nil ;
 	int time_since_virus <- 0;
 	int time_to_mature <- 3 ;	
-	
+	float vital <-  1.0;
+	float biterate <- 1.0;
+	float reprate <- 1.0;
 	int num_meals_today <- 0;
 	bool carrying_eggs <- false;
 	int time_since_eggs <- 0;
 	int mos_age <- 0;
-	int adult_lifespan <- 5;
+	int adult_lifespan <- 42;
 	int time_passed_virus <- 0;
 	rgb color <- #green;
+	bool onetime <- true;
+	bool ability_to_infected_bite <- false;
+	//pathogen 
+	int n <- 0;
+	int k <- 100;
+	int flavivirusrate <- 0;
+	int threshold <- 50 + rnd(100 - 50);
+	reflex createpathogen when : onetime{
+		if(is_infected){
+			onetime <- false;
+			n <- 1 + rnd(20 - 1);
+			flavivirusrate <- 12 + rnd(25 - 12);
+		}
+	}
 	reflex move when:  !(current_hour < 7 or current_hour > 20){
 		do wander ;
 	}
-
+	reflex pathogeninfection
+	{
+		float r <- flavivirusrate / 100;
+		float l <- (k - n) / k;
+		n <- int (r * n * l) ;  
+		if(n > threshold)
+		{
+			ability_to_infected_bite <- true;
+		}
+		else
+		{
+			ability_to_infected_bite <- false;
+		}
+	}
+	reflex tempdependece {
+		vital <- tbv[2,cur_temp];
+		biterate <- tbv[1,cur_temp];
+		reprate <- trr[1,prec_rainfall];
+		if(flip(vital))
+		{
+			do die;
+		}
+	}
 	reflex age when: time mod 86400=0{
 		mos_age <- mos_age + 1;
 		if(mos_age > adult_lifespan){				
@@ -229,7 +339,7 @@ species mosquito skills:[moving]{
 	}
 	
 	reflex feed when:  current_hour>=9 and current_hour<=18 and time mod 600 = 0 and num_meals_today<max_meals{
-		if is_infected{
+		if (is_infected){
 			ask any (people at_distance sensor_range) {
 					myself.num_meals_today <- myself.num_meals_today + 1;
 					if myself.is_infected{
@@ -273,7 +383,15 @@ species mosquito skills:[moving]{
 	
 	
 	reflex reproduce when: time_since_eggs>=3 and time mod 600 = 0{
-			create egg number:10{
+			int eggreproduced <- 0;
+			loop times: 10 {
+				if(flip(reprate))
+				{
+					eggreproduced <-  eggreproduced + 10;
+				}
+			} 
+			
+			create egg number:eggreproduced{
 				living_place <- myself.living_place ;
 				age <- 0;
 				max_age <- 8;
@@ -309,7 +427,57 @@ aspect base{
 		draw shape color:color;
 	}
 }
-
+species bounds {
+	string type; 
+	rgb color <- rgb(128,128,0);
+	reflex tempchange
+	{
+		if(cur_temp >=10 and cur_temp <= 18)
+		{
+			type <- "cool";
+			color <- rgb(128,128,0);
+		}
+		if(cur_temp >=19 and cur_temp <= 25)
+		{
+			type <- "normal";
+			color <- rgb(200,200,0);
+		}
+		if(cur_temp >=25 and cur_temp <= 40)
+		{
+			type <- "hot";
+			color <- rgb(255,255,0);
+		}
+	}
+	aspect base {
+		draw shape color: color ;
+	}
+}
+species rainbounds {
+	string type; 
+	rgb color <- rgb(128,0,0,50);
+	
+	reflex rainchange
+	{
+		if(prec_rainfall >=3 and prec_rainfall <= 7)
+		{
+			type <- "mild";
+			color <- rgb(128,0,0,50);
+		}
+		if(prec_rainfall >=8 and prec_rainfall <= 10)
+		{
+			type <- "average";
+			color <- rgb(200,0,0);
+		}
+		if(prec_rainfall >=11 and prec_rainfall <= 14)
+		{
+			type <- "heavy";
+			color <- rgb(255,0,0);
+		}
+	}
+	aspect base {
+		draw shape color: color ;
+	}
+}
 species building {
 	string type; 
 	rgb color <- #gray  ;
@@ -364,8 +532,25 @@ species people skills:[moving] {
 	int maxinfecteddays <- 7;
 	list<int> state_duration <- [minsusceptibledays + rnd (maxsusceptibledays - minsusceptibledays),minexposeddays + rnd (maxexposeddays - minexposeddays),mininfecteddays + rnd (maxinfecteddays - mininfecteddays),60]; 
 	int days_infected <- 0;
-	
-	
+	float mobrate <- 1.0;
+	reflex tempdependence  {
+		ask rainbounds {
+			write "rainbdouns" + self.type + "rainfall"  + prec_rainfall;
+			if(self.type = "mild")
+			{
+				myself.mobrate <- 0.9;
+			}
+			if(self.type = "average")
+			{
+				myself.mobrate <- 0.8;
+			}
+			if(self.type = "heavy")
+			{
+				myself.mobrate <- 0.5;
+			}
+		}
+		write "tempdependence" + mobrate;
+	}
 	reflex sexualtransmission {
 		ask any (people at_distance human_sensor_range_2) {
 				if(myself.sex = 1 and self.age - myself.age <=4 and self.is_infected = true and myself.is_pregnant = true)
@@ -396,7 +581,7 @@ species people skills:[moving] {
 			}
 		}	
 	
-	reflex time_to_work when: current_hour = start_work and objective = "resting"{
+	reflex time_to_work when: current_hour = start_work and objective = "resting" and flip(mobrate){
 		objective <- "working" ;
 		the_target <- any_location_in (working_place);
 		in_my_house <- false;
@@ -410,7 +595,7 @@ species people skills:[moving] {
 		mobility_state <- 0;
 		 
 	} 
-	reflex time_to_go_leisure when: current_hour = start_leisure and objective = "resting"{
+	reflex time_to_go_leisure when: current_hour = start_leisure and objective = "resting" and flip(mobrate){
 		objective <- "working" ;
 		the_target <- any_location_in (leisure_place);
 		in_my_house <- false;
@@ -485,6 +670,8 @@ experiment Human_intercity_mobility type: gui {
 	
 	
 		display city_display type:opengl {
+			species bounds aspect: base;
+			species rainbounds aspect: base;
 			species building aspect: base ;
 			species road aspect: base ;
 			species people aspect: base ;
