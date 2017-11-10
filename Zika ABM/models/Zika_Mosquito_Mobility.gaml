@@ -29,9 +29,9 @@ global {
 //exponential
 	file trr_file <- csv_file("../includes/TempRainfallReprorate.csv",",");
 	
-	file shape_file_buildings <- file("../includes/ShpFiles/RaceCourse/RhBuildings.shp");
-	file shape_file_roads <- file("../includes/ShpFiles/RaceCourse/RhRoads.shp");
-	file shape_file_bounds <- file("../includes/ShpFiles/RaceCourse/RhBounds.shp");
+	file shape_file_buildings <- file("../includes/ShpFiles/Ashoknagar/Ashoknagar.shp");
+	file shape_file_roads <- file("../includes/ShpFiles/Ashoknagar/Ashoknagarr.shp");
+	file shape_file_bounds <- file("../includes/ShpFiles/Ashoknagar/Ashoknagarb.shp");
 	
 	geometry shape <- envelope(shape_file_buildings);
 	graph the_graph;
@@ -106,12 +106,38 @@ global {
 			trr <- matrix(trr_file);
 			
 		
-		create building from: shape_file_buildings with: [type::string(read ("NATURE"))] {
+		create building from: shape_file_buildings with: [isbuilding::string(read ("building"))] {
+			
+			if isbuilding="yes"
+			{
+				if(flip(0.7))
+				{
+					type <- "Residential";
+				}
+				else if(flip(0.5))
+				{
+					type <- "Industrial";
+				}
+				else {
+					type <- "Leisure";
+				}
+			}
+			else {
+				if(flip(0.3)) 
+				{
+					type <- "Leisure";
+				}
+				else 	{
+					
+					type <- "Lake"; 
+				}
+			}
 			if type="Industrial" {
 				color <- #red ;
 			}
 			if type="Leisure" {
-				color <- #pink ;
+					
+				color <- #violet ;
 			}
 			if type="Lake" {
 				color <- #blue ;
@@ -167,7 +193,10 @@ global {
 			}
 		create mosquito  number:mosquito_no {
 				living_place <- one_of(watersources);
+				if(living_place = 0) {
 				location <- any_location_in(living_place);	
+				
+				}
 				mos_age <- 0;
 				is_infected <- false;
 		}
@@ -203,7 +232,7 @@ global {
  			max_rainfall <- 14; 
  		} 		
  		prec_rainfall <- min_rainfall + rnd (max_rainfall - min_rainfall) ;
- 		//write "hello" + prec_rainfall + "temp" + cur_temp ;
+ 		write "hello" + prec_rainfall + "temp" + cur_temp ;
  		list<building>  watersources <- building  where (each.type="Lake") ;
  		int leftmosquitoes <- (1000 - nb_mosquitoes_left);
  		if(prec_rainfall >=2 and prec_rainfall <= 7)
@@ -253,7 +282,7 @@ global {
 		}
 	}
 	
-	reflex save_result when: ((days_passed = 10 and current_hour = 2))  {
+	reflex save_result when: (((days_passed = 365 or days_passed = 60 or days_passed = 180 or days_passed = 240) and current_hour = 2))  {
 	/* 	save ("cycle: "+ cycle + "; nb_people_infected: " + nb_people_infected
 			+ "; nb_mosquito_infected: " + nb_mosquito_infected
 			+ "; nb_microcephaly_cases: " + nb_microcephaly_cases
@@ -263,16 +292,17 @@ global {
 	   		to: "captured_data.csv" type: "csv" ;
 	   		* 
 	   		*/
-	   	save (" " + nb_microcephaly_cases
+	   	save (" " + days_passed + nb_microcephaly_cases
 	   		+ ", " + nb_home_place_infections           
 	   		+ ", " + nb_working_place_infections       
 	   		+ ", " + nb_leisure_place_infections) 
 	   		to: "captured_data.csv" type: "csv" ;
-	   	do halt ;
+	
 	}
 	
-	reflex stop_simulation when: (days_passed = 360 or mosquito_no <=0) {
-		do pause ;
+	reflex stop_simulation when: (days_passed = 360) {
+		write "dadadd" ;
+		do halt ;
 	} 
 	
 }
@@ -341,7 +371,7 @@ species mosquito skills:[moving]{
     			pathogen_count <-  ( pathogen_count - pathogen_count * recessK ) ;
 				
 				}  
-					write "pathogen_count" + pathogen_count;
+				//	write "pathogen_count" + pathogen_count;
 					if(pathogen_count > pathogen_threshold){
 						ability_to_infected_bite <- true;
 						
@@ -391,7 +421,7 @@ species mosquito skills:[moving]{
 					float p_trans <- 0.3;					
 						if (state=0){
 							if flip(p_trans * p_bite){	
-								write "p_bite" +p_bite;
+							//	write "p_bite" +p_bite;
 								is_infected <- true;
 								state <- 1;
 								nb_infected_cumulative <- nb_infected_cumulative+1;
@@ -528,6 +558,7 @@ species rainbounds {
 	}
 }
 species building {
+	string isbuilding;
 	string type; 
 	rgb color <- #gray  ;
 	
